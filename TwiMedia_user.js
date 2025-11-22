@@ -1,20 +1,24 @@
 // ==UserScript==
 // @name         TwiMedia
 // @namespace    http://tampermonkey.net/
-// @version      0.1
+// @version      0.2
 // @description  Twitterタイムラインをグリッド表示にします
 // @author       You
 // @match        https://twitter.com/home
 // @match        https://x.com/home
-// @grant        none
+// @grant        GM_setValue
+// @grant        GM_getValue
 // ==/UserScript==
 
-(function () {
+(async function () {
     "use strict";
 
     const SCRIPT_ID = "twi-media-style";
     const GRID_CONTAINER_ID = "twi-media-grid-container";
     const GRID_ACTIVE_CLASS = "twi-media-grid-active";
+    const PROCESSED_CLASS = "twi-media-processed";
+    const TOGGLE_BUTTON_ID = "twi-media-toggle-button";
+    const STORAGE_KEY = "twi_media_grid_enabled";
 
     // --- ユーティリティ ---
     function debounce(func, wait) {
@@ -31,149 +35,129 @@
 
     // --- CSSの注入 ---
     function injectStyles() {
-        // スタイルが既に注入されている場合は何もしない
         if (document.getElementById(SCRIPT_ID)) return;
 
         const style = document.createElement("style");
         style.id = SCRIPT_ID;
         style.textContent = `
-            /* --- グリッド有効時の状態 --- */
-
-            /* グリッドが有効な場合、元のタイムラインを非表示にする */
             body.${GRID_ACTIVE_CLASS} div[aria-label="タイムライン: ホームタイムライン"] {
                 display: none !important;
             }
-
-            /* グリッドが有効な場合、新しいグリッドコンテナを表示する */
             body.${GRID_ACTIVE_CLASS} #${GRID_CONTAINER_ID} {
                 display: grid;
             }
-
-            /* --- グリッド無効時の状態 (デフォルト) --- */
-
-            /* 新しいグリッドコンテナはデフォルトで非表示 */
             #${GRID_CONTAINER_ID} {
                 display: none;
-                grid-template-columns: repeat(3, 1fr); /* 固定3列 */
+                grid-template-columns: repeat(3, 1fr);
                 grid-gap: 2px;
                 padding: 0 4px;
             }
-
-            /* --- グリッドアイテム共通スタイル --- */
-
             .twi-media-grid-item {
-                text-decoration: none;
-                display: block;
-                position: relative;
-                width: 100%;
-                padding-bottom: 100%; /* 1:1のアスペクト比 */
+                text-decoration: none; display: block; position: relative;
+                width: 100%; padding-bottom: 100%;
                 background-size: cover;
                 background-position: center;
-                /* 角を丸くするスタイルや背景色は削除 */
                 overflow: hidden;
+            }
+            #${TOGGLE_BUTTON_ID} {
+                margin: 10px 0; padding: 10px 15px; font-size: 15px;
+                font-weight: bold; color: #fff; background-color: #1DA1F2;
+                border: none; border-radius: 9999px; cursor: pointer;
+                transition: background-color 0.2s;
+            }
+            #${TOGGLE_BUTTON_ID}:hover { background-color: #1A91DA; }
+            body.${GRID_ACTIVE_CLASS} #${TOGGLE_BUTTON_ID} {
+                background-color: #1A91DA;
+                box-shadow: 0 0 0 2px #1DA1F2;
             }
         `;
         document.head.appendChild(style);
-        console.log("TwiMedia: 並列タイムラインのスタイルを注入しました。");
     }
 
     // --- DOMの再構築 ---
     function rebuildTimeline() {
-        // グリッドが有効でない場合は何もしない
         if (!document.body.classList.contains(GRID_ACTIVE_CLASS)) return;
-
         const originalTimeline = document.querySelector('div[aria-label="タイムライン: ホームタイムライン"]');
         if (!originalTimeline) return;
-
-        // カスタムグリッドコンテナを見つけるか、作成して元のタイムラインの隣に配置する
         let gridContainer = document.getElementById(GRID_CONTAINER_ID);
         if (!gridContainer) {
             gridContainer = document.createElement('div');
             gridContainer.id = GRID_CONTAINER_ID;
             originalTimeline.parentNode.insertBefore(gridContainer, originalTimeline.nextSibling);
         }
-
-        //【変更点】まだ処理されていない新しいツイートのみを収集する
-        const newTweets = originalTimeline.querySelectorAll('article[data-testid="tweet"]:not(.twi-media-processed)');
-        if (newTweets.length === 0) return; // 新しいツイートがなければ何もしない
-
-        console.log(`TwiMedia: 処理する新しいツイートを${newTweets.length}件見つけました。`);
-
-        // 各ツイートを処理して新しいグリッドアイテムを作成する
+        const newTweets = originalTimeline.querySelectorAll(`article[data-testid="tweet"]:not(.${PROCESSED_CLASS})`);
+        if (newTweets.length === 0) return;
         newTweets.forEach((tweet) => {
-            //【変更点】処理済みクラスを最初に追加して、重複処理を確実に防ぐ
-            tweet.classList.add('twi-media-processed');
-
+            tweet.classList.add(PROCESSED_CLASS);
             const photoEl = tweet.querySelector('[data-testid="tweetPhoto"]');
             const videoEl = tweet.querySelector('[data-testid="videoPlayer"]');
-
-            // ツイートステータスへの正しいリンクを見つける
             let tweetLinkEl = null;
             const timeLink = tweet.querySelector('a[href*="/status/"] time');
             if (timeLink && timeLink.parentNode.tagName === "A") {
                 tweetLinkEl = timeLink.parentNode;
             }
-
-            // 写真または動画があり、ツイートリンクがある場合のみ処理
             if ((photoEl || videoEl) && tweetLinkEl) {
                 const tweetUrl = tweetLinkEl.href;
-
-                // 重複を避けるためにツイートURLをユニークなIDとして使用する
                 const itemId = `twi-media-item-${tweetUrl.split("/status/")[1].replace("/", "-")}`;
-                if (document.getElementById(itemId)) {
-                    return; // 既に存在する場合はスキップ
-                }
-
+                if (document.getElementById(itemId)) return;
                 let mediaUrl;
                 if (photoEl) {
                     const img = photoEl.querySelector("img");
                     if (img) mediaUrl = img.src;
                 } else if (videoEl) {
                     const poster = videoEl.querySelector('div[style*="background-image"]');
-                    if (poster) {
-                        mediaUrl = poster.style.backgroundImage.slice(5, -2); // "url(...)"からURLを抽出
-                    }
+                    if (poster) mediaUrl = poster.style.backgroundImage.slice(5, -2);
                 }
-
                 if (mediaUrl) {
-                    // URLを?format=jpg&name=origに変換
                     mediaUrl = mediaUrl.replace(/\?format=[^&]+&name=[^&]+/, "?format=jpg&name=orig");
-
-                    // シンプルな構造に基づいて新しいグリッドアイテムを作成する
                     const gridItem = document.createElement("a");
                     gridItem.id = itemId;
                     gridItem.href = tweetUrl;
                     gridItem.className = "twi-media-grid-item";
                     gridItem.style.backgroundImage = `url(${mediaUrl})`;
-                    gridItem.target = "_blank"; // 新しいタブで開く
+                    gridItem.target = "_blank";
                     gridItem.rel = "noopener noreferrer";
-
                     gridContainer.appendChild(gridItem);
                 }
             }
         });
     }
 
-    // この関数は現在使用されていませんが、ボタン用に使用されます
-    function toggleGrid(enable) {
-        document.body.classList.toggle(GRID_ACTIVE_CLASS, enable);
-        console.log(`TwiMedia: グリッドを${enable ? "ON" : "OFF"}に切り替えました。`);
-        if (enable) {
+    // --- UIと状態管理 ---
+    function toggleGrid(forceState) {
+        const shouldBeEnabled = typeof forceState === 'boolean' ? forceState : !document.body.classList.contains(GRID_ACTIVE_CLASS);
+        document.body.classList.toggle(GRID_ACTIVE_CLASS, shouldBeEnabled);
+        GM_setValue(STORAGE_KEY, shouldBeEnabled);
+        if (shouldBeEnabled) {
             rebuildTimeline();
         }
     }
 
+    function createToggleButton() {
+        if (document.getElementById(TOGGLE_BUTTON_ID)) return;
+        const nav = document.querySelector('header[role="banner"] nav[role="navigation"]');
+        if (!nav) {
+            setTimeout(createToggleButton, 500);
+            return;
+        }
+        const button = document.createElement("button");
+        button.id = TOGGLE_BUTTON_ID;
+        button.textContent = "Grid";
+        button.addEventListener("click", () => toggleGrid());
+        nav.appendChild(button);
+    }
+
     // --- 初期化 ---
     injectStyles();
+    createToggleButton();
 
-    // デフォルトでグリッドを有効にする
-    toggleGrid(true);
+    const isEnabled = await GM_getValue(STORAGE_KEY, true); // デフォルトはオン
+    toggleGrid(isEnabled);
 
-    // MutationObserverとscrollイベントの両方で、同じデバウンスされた関数を呼び出す
     const debouncedRebuild = debounce(rebuildTimeline, 500);
     const observer = new MutationObserver(debouncedRebuild);
     observer.observe(document.body, { childList: true, subtree: true });
     window.addEventListener('scroll', debouncedRebuild, { passive: true });
 
-    console.log('TwiMedia: 並列タイムラインスクリプトが読み込まれました。');
+    console.log('TwiMedia: Violentmonkeyストレージ対応スクリプトが読み込まれました。');
 })();
