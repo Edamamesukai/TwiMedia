@@ -58,6 +58,7 @@
                 background-size: cover;
                 background-position: center;
                 overflow: hidden;
+                cursor: pointer; /* クリック可能であることを示すカーソル */
             }
             /* --- ボタンのスタイル --- */
             #${TOGGLE_BUTTON_ID} {
@@ -124,14 +125,34 @@
                     if (poster) mediaUrl = poster.style.backgroundImage.slice(5, -2);
                 }
                 if (mediaUrl) {
-                    mediaUrl = mediaUrl.replace(/\?format=[^&]+&name=[^&]+/, "?format=jpg&name=orig");
-                    const gridItem = document.createElement("a");
+                    // 元々のフォーマット(png, jpgなど)を維持しつつ、画像サイズを'orig'に変更
+                    mediaUrl = mediaUrl.replace(/(name=)[^&]+/, "$1orig");
+
+                    // aタグからdivタグに変更
+                    const gridItem = document.createElement("div");
                     gridItem.id = itemId;
-                    gridItem.href = tweetUrl;
                     gridItem.className = "twi-media-grid-item";
                     gridItem.style.backgroundImage = `url(${mediaUrl})`;
-                    gridItem.target = "_blank";
-                    gridItem.rel = "noopener noreferrer";
+
+                    // クリックしたら元のツイートをクリックするイベントを追加
+                    gridItem.addEventListener("click", (e) => {
+                        e.preventDefault();
+                        const originalTweetArticle = tweet.closest('article[data-testid="tweet"]');
+                        if (originalTweetArticle) {
+                            const photoEl = originalTweetArticle.querySelector('[data-testid="tweetPhoto"]');
+                            const videoEl = originalTweetArticle.querySelector('[data-testid="videoPlayer"]');
+
+                            if (photoEl) {
+                                photoEl.click();
+                            } else if (videoEl) {
+                                videoEl.click();
+                            } else {
+                                // メディア要素が見つからない場合のフォールバック
+                                originalTweetArticle.click();
+                            }
+                        }
+                    });
+
                     gridContainer.appendChild(gridItem);
                 }
             }
