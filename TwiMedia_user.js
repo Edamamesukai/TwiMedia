@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TwiMedia
 // @namespace    http://tampermonkey.net/
-// @version      0.1
+// @version      0.2
 // @description  Twitterタイムラインをグリッド表示にします
 // @author       You
 // @match        https://twitter.com/home
@@ -17,7 +17,9 @@
     const GRID_CONTAINER_ID = "twi-media-grid-container";
     const GRID_ACTIVE_CLASS = "twi-media-grid-active";
     const PROCESSED_CLASS = "twi-media-processed";
-    const TOGGLE_BUTTON_ID = "twi-media-toggle-button";
+    const TOGGLE_BUTTON_CLASS = "twi-media-toggle-button";
+    const TOGGLE_BUTTON_PC_ID = "twi-media-toggle-button-pc";
+    const TOGGLE_BUTTON_MOBILE_ID = "twi-media-toggle-button-mobile";
     const STORAGE_KEY = "twi_media_grid_enabled";
 
     // --- ユーティリティ ---
@@ -61,7 +63,7 @@
                 cursor: pointer; /* クリック可能であることを示すカーソル */
             }
             /* --- ボタンのスタイル --- */
-            #${TOGGLE_BUTTON_ID} {
+            .${TOGGLE_BUTTON_CLASS} {
                 margin-bottom: 8px; /* 下に余白を追加 */
                 padding-top: 12px; /* 上の余白を調整 */
                 padding-bottom: 12px; /* 下の余白を調整 */
@@ -70,19 +72,19 @@
                 border-color: rgb(29, 155, 240);
             }
             /* オフの時（デフォルト）のホバー */
-            #${TOGGLE_BUTTON_ID}:hover {
+            .${TOGGLE_BUTTON_CLASS}:hover {
                 background-color: rgb(29, 155, 240);
             }
             /* オン時のスタイル（青色） */
-            body.${GRID_ACTIVE_CLASS} #${TOGGLE_BUTTON_ID} {
+            body.${GRID_ACTIVE_CLASS} .${TOGGLE_BUTTON_CLASS} {
                 background-color: rgb(29, 155, 240); /* Twitterの青色 */
                 border-color: rgb(29, 155, 240); /* 枠線も青色に */
             }
-            body.${GRID_ACTIVE_CLASS} #${TOGGLE_BUTTON_ID} span {
+            body.${GRID_ACTIVE_CLASS} .${TOGGLE_BUTTON_CLASS} span {
                 color: rgb(255, 255, 255); /* 白文字 */
             }
             /* オン時のホバー */
-            body.${GRID_ACTIVE_CLASS} #${TOGGLE_BUTTON_ID}:hover {
+            body.${GRID_ACTIVE_CLASS} .${TOGGLE_BUTTON_CLASS}:hover {
                 background-color: rgb(244, 33, 46);
                 border-color: rgb(244, 33, 46);
             }
@@ -169,44 +171,60 @@
         }
     }
 
+    // ボタン要素を生成するヘルパー関数
+    function createButtonElement(id) {
+        const button = document.createElement("div");
+        button.id = id;
+        button.role = "button";
+        button.tabIndex = 0;
+        // PC版の「フォローする」ボタンのクラスと、共通クラスを追加
+        button.className = "css-175oi2r r-sdzlij r-1phboty r-rs99b7 r-lrvibr r-2yi16 r-1qi2l1t r-1loqt21 r-o7ynqc r-6416eg r-1ny4l3l " + TOGGLE_BUTTON_CLASS;
+        button.addEventListener("click", (e) => {
+            e.preventDefault();
+            e.stopPropagation(); // 親要素へのイベント伝播を停止
+            toggleGrid();
+        });
+
+        const div = document.createElement("div");
+        div.dir = "ltr";
+        // 内部divのクラスをコピー
+        div.className = "css-901oao r-1awozwy r-6koalj r-18u37iz r-16y2uox r-37j5jr r-a023e6 r-b88u0q r-1777fci r-rjixqe r-bcqeeo r-q4m81j r-qvutc0";
+
+        const span = document.createElement("span");
+        // 内部spanのクラスをコピー
+        span.className = "css-901oao css-16my406 r-poiln3 r-bcqeeo r-qvutc0";
+        span.textContent = "Grid";
+
+        div.appendChild(span);
+        button.appendChild(div);
+        return button;
+    }
+
     function createToggleButton() {
-        // header[role="banner"] がDOMに追加されるのを待つ
         const observer = new MutationObserver((mutations, obs) => {
-            const header = document.querySelector('header[role="banner"]');
-            if (header) {
-                // headerが見つかったら、ボタンの作成を試みる
-                if (document.getElementById(TOGGLE_BUTTON_ID)) return; // 既に存在する場合は何もしない
+            // --- PC版ビューの処理 ---
+            if (!document.getElementById(TOGGLE_BUTTON_PC_ID)) {
+                const header = document.querySelector('header[role="banner"]');
+                if (header) {
+                    const postButton = header.querySelector('a[aria-label="ポストする"]');
+                    if (postButton) {
+                        const button = createButtonElement(TOGGLE_BUTTON_PC_ID);
+                        postButton.parentNode.insertBefore(button, postButton);
+                        console.log("TwiMedia: GridボタンをPC版ビューに追加しました。");
+                    }
+                }
+            }
 
-                // 「フォローする」ボタンのスタイルを模倣
-                const button = document.createElement("div");
-                button.id = TOGGLE_BUTTON_ID;
-                button.role = "button";
-                button.tabIndex = 0;
-                // 「フォローする」ボタンのクラスをコピー
-                button.className = "css-175oi2r r-sdzlij r-1phboty r-rs99b7 r-lrvibr r-2yi16 r-1qi2l1t r-1loqt21 r-o7ynqc r-6416eg r-1ny4l3l";
-                button.addEventListener("click", (e) => {
-                    e.preventDefault();
-                    toggleGrid();
-                });
+            // --- モバイル版サイドメニューの処理 ---
+            if (!document.getElementById(TOGGLE_BUTTON_MOBILE_ID)) {
+                const accountMenu = document.querySelector('div[aria-label="アカウント"]');
 
-                const div = document.createElement("div");
-                div.dir = "ltr";
-                // 内部divのクラスをコピー
-                div.className = "css-901oao r-1awozwy r-6koalj r-18u37iz r-16y2uox r-37j5jr r-a023e6 r-b88u0q r-1777fci r-rjixqe r-bcqeeo r-q4m81j r-qvutc0";
-
-                const span = document.createElement("span");
-                // 内部spanのクラスをコピー
-                span.className = "css-901oao css-16my406 r-poiln3 r-bcqeeo r-qvutc0";
-                span.textContent = "Grid";
-
-                div.appendChild(span);
-                button.appendChild(div);
-
-                const postButton = header.querySelector('a[aria-label="ポストする"]');
-                if (postButton) {
-                    postButton.parentNode.insertBefore(button, postButton);
-                    console.log("TwiMedia: Gridボタンをポストボタンの上に追加しました。");
-                    obs.disconnect(); // 成功したら監視を停止
+                // logoutLinkの存在を待たずに、メニューコンテナが見つかり次第ボタンを追加する
+                if (accountMenu) {
+                    const button = createButtonElement(TOGGLE_BUTTON_MOBILE_ID);
+                    button.style.margin = "4px 12px";
+                    accountMenu.appendChild(button);
+                    console.log("TwiMedia: Gridボタンをモバイル版メニューに追加しました。");
                 }
             }
         });
